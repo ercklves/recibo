@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gerador de Recibo - ATIVA</title>
+
+  <!-- jsPDF CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <style>
+    body {
+      font-family: "Bahnschrift", "Segoe UI", Tahoma, Arial, sans-serif;
+      background: #f5f7fa;
+      padding: 24px;
+      display: flex;
+      justify-content: center;
+    }
+    .card {
+      width: 760px;
+      background: #fff;
+      padding: 22px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+      border-radius: 8px;
+    }
+    label { font-weight:700; font-size:14px; display:block; margin-top:12px; color:#243447; }
+    input[type="text"], textarea, input[type="date"] {
+      width:100%; padding:10px; margin-top:6px; border:1px solid #d6dbe0; border-radius:6px;
+      font-size:15px;
+    }
+    textarea { min-height:90px; resize:vertical; }
+    button {
+      margin-top:16px; width:100%; padding:12px; font-weight:800; font-size:16px;
+      background:#0056b3; color:#fff; border:none; border-radius:8px; cursor:pointer;
+    }
+    .note { margin-top:8px; font-size:13px; color:#666; }
+    .alert { background:#fff3cd; padding:10px; border-radius:6px; margin-top:8px; display:none; }
+    /* Tente carregar a Bahnschrift local (coloque bahnschrift.ttf ao lado do HTML). */
+    @font-face {
+      font-family: 'BahnschriftLocal';
+      src: local('Bahnschrift'), url('bahnschrift.ttf') format('truetype');
+      font-weight: normal; font-style: normal;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2 style="margin:0 0 8px 0">Gerador de Recibo - ATIVA</h2>
+
+    <label>Nome / Razão Social (Recebemos do(a))</label>
+    <input id="cliente" type="text" placeholder="Ex: Hotel Village Campina Grande LTDA" />
+
+    <label>CNPJ / CPF</label>
+    <input id="cnpj" type="text" placeholder="Ex: 13.798.166/0001-47" />
+
+    <label>Valor Total (R$)</label>
+    <input id="valor_total" type="text" placeholder="180,00" oninput="formatarMoeda(this); gerarExtensoAutomatica(this.value);" />
+
+    <label>Importância por Extenso (automático)</label>
+    <input id="valor_extenso" type="text" readonly placeholder="Ex: MIL E DUZENTOS REAIS E VINTE CENTAVOS" />
+
+    <label>Descrição (Referente a)</label>
+    <textarea id="descricao" placeholder="Lista de serviços / produtos"></textarea>
+
+    <label>Data de Emissão</label>
+    <input id="data" type="date" />
+
+    <div class="note">Coloque <code>recibo_modelo.jpg</code> na mesma pasta do arquivo HTML. Opcionalmente coloque <code>bahnschrift.ttf</code> para usar a fonte Bahnschrift.</div>
+    <div id="alerta" class="alert"></div>
+    <button onclick="gerarPDF()">Gerar Recibo em PDF</button>
+  </div>
+
+<script>
+  // ========== helpers ==========
+  function formatarMoeda(input){
+    // aceita números e vírgula
+    let v = input.value.replace(/[^\d,]/g, "");
+    if(!v) { input.value = ""; return; }
+    // garante 2 casas
+    v = v.replace(/,/, '').padStart(3,'0'); // simplificação
+    // transforma em número de centavos
+    let n = parseInt(v);
+    let reais = Math.floor(n/100);
+    let cent = (n%100).toString().padStart(2,'0');
+    input.value = reais.toLocaleString('pt-BR') + ',' + cent;
+  }
+
+  function formatarData(dataString) {
+    if (!dataString) return "";
+    const [ano, mes, dia] = dataString.split('-');
+    return `${dia}/${mes}/${ano}`;
+  }
+
+  // Conversor para extenso (baseado no código que você tinha)
+  function valorPorExtenso(v){
+    const unidade = ['', 'um','dois','três','quatro','cinco','seis','sete','oito','nove'];
+    const dezena = ['', 'dez','vinte','trinta','quarenta','cinquenta','sessenta','setenta','oitenta','noventa'];
+    const especial = ['dez','onze','doze','treze','catorze','quinze','dezesseis','dezessete','dezoito','dezenove'];
+    const centena = ['', 'cento','duzentos','trezentos','quatrocentos','quinhentos','seiscentos','setecentos','oitocentos','novecentos'];
+
+    function porExtenso(n){
+      n = parseInt(n,10);
+      if(n===0) return '';
+      if(n<10) return unidade[n];
+      if(n>=10 && n<=19) return especial[n-10];
+      if(n>=20 && n<=99){
+        return dezena[Math.floor(n/10)] + (n%10!==0 ? ' e ' + unidade[n%10] : '');
+      }
+      if(n>=100 && n<=999){
+        if(n===100) return 'cem';
+        return centena[Math.floor(n/100)] + (n%100 !== 0 ? ' e ' + porExtenso(n%100) : '');
+      }
+      if(n>=1000 && n<=999999){
+        const milhares = Math.floor(n/1000);
+        const resto = n%1000;
+        let res = (milhares===1 ? 'mil' : porExtenso(milhares) + ' mil');
+        if(resto !== 0) {
+          res += (resto < 100 ? ' e ' : ', ') + porExtenso(resto);
+        }
+        return res;
+      }
+      if(n>=1000000){
+        const milhoes = Math.floor(n/1000000);
+        const resto = n%1000000;
+        let res = (milhoes===1 ? 'um milhão' : porExtenso(milhoes) + ' milhões');
+        if(resto !== 0) {
+          res += (resto < 100000 ? ' e ' : ', ') + porExtenso(resto);
+        }
+        return res;
+      }
+      return '';
+    }
+
+    const partes = Number(v).toFixed(2).split('.');
+    const inteiros = parseInt(partes[0],10);
+    const centavos = parseInt(partes[1],10);
+    let resultado = '';
+    if(inteiros > 0){
+      resultado = porExtenso(inteiros) + (inteiros===1 ? ' real' : ' reais');
+    }
+    if(centavos > 0){
+      const extCent = porExtenso(centavos) + (centavos===1 ? ' centavo' : ' centavos');
+      if(resultado !== '') resultado += ' e ';
+      resultado += extCent;
+    }
+    return resultado || 'zero reais';
+  }
+
+  function gerarExtensoAutomatica(valorFormatado){
+    if(!valorFormatado){ document.getElementById('valor_extenso').value = ''; return; }
+    // valorFormatado ex: "1.234,56" ou "1234,56" ou "1234"
+    const clean = valorFormatado.replace(/\./g,'').replace(',', '.').replace(/[^\d.]/g,'');
+    const num = parseFloat(clean);
+    if(isNaN(num)){ document.getElementById('valor_extenso').value = ''; return; }
+    const ext = valorPorExtenso(num);
+    document.getElementById('valor_extenso').value = ext.toUpperCase();
+  }
+
+  // ====================================================
+  // COORDENADAS EM PIXELS (as que você me passou)
+  // ====================================================
+  const coordsPx = {
+    valor_total: { x: 1957.79, y: 2693.73 },
+    cliente:     { x: 1025.02, y: 2512.39 },
+    cnpj:        { x: 1891.70, y: 2509.85 },
+    extenso:     { x: 1459.15, y: 2448.11 },
+    descricao:   { x: 1378.44, y: 1831.29 },
+    data:        { x: 1414.29, y: 1120.58 },
+    // tamanho da imagem informado por você
+    imgSizePx:   { w: 2479.49, h: 3497.22 }
+  };
+
+  // ====================================================
+  // Função principal que gera o PDF usando jsPDF
+  // ====================================================
+  async function gerarPDF(){
+    const alerta = document.getElementById('alerta');
+    alerta.style.display = 'none';
+    alerta.innerText = '';
+
+    // coleta campos
+    const cliente = document.getElementById('cliente').value.trim();
+    const cnpj    = document.getElementById('cnpj').value.trim();
+    const valorStr= document.getElementById('valor_total').value.trim();
+    const extenso = document.getElementById('valor_extenso').value.trim();
+    const descricao = document.getElementById('descricao').value.trim();
+    const dataInput = document.getElementById('data').value;
+
+    // validações simples
+    const faltantes = [];
+    if(!cliente) faltantes.push('Cliente');
+    if(!valorStr) faltantes.push('Valor Total');
+    if(!descricao) faltantes.push('Descrição');
+    if(!dataInput) faltantes.push('Data');
+    if(faltantes.length){
+      alerta.style.display = 'block';
+      alerta.innerText = 'Preencha: ' + faltantes.join(', ');
+      return;
+    }
+
+    // formata valor para exibição numérica (R$ 1.234,56)
+    const clean = valorStr.replace(/\./g,'').replace(',', '.').replace(/[^\d.]/g,'');
+    const valorNum = parseFloat(clean) || 0;
+    const valorFormatado = valorNum.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+    // Carrega a imagem de fundo (recibo_modelo.jpg) — deve estar na mesma pasta
+    const img = new Image();
+    img.src = 'recibo_modelo.jpg';
+    img.onload = function(){
+      // pega tamanho real da imagem (se diferente do informado pelo usuário)
+      const imgW_px = img.naturalWidth || coordsPx.imgSizePx.w;
+      const imgH_px = img.naturalHeight || coordsPx.imgSizePx.h;
+
+      // inicializa jsPDF (A4 retrato em pontos)
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ unit: 'pt', format: 'a4' });
+      const pageW = pdf.internal.pageSize.getWidth();   // ~595
+      const pageH = pdf.internal.pageSize.getHeight();  // ~842
+
+      // escalar a imagem para caber na página mantendo proporção
+      const scaleX = pageW / imgW_px;
+      const scaleY = pageH / imgH_px;
+      // normalmente scaleX ~ scaleY, mas usaremos duas escalas separadas para converter px->pt
+      // desenha a imagem esticada para ocupar a página inteira (igual ao seu fluxo anterior)
+      pdf.addImage(img, 'JPEG', 0, 0, pageW, pageH);
+
+      // Função de conversão px->pt para X e Y
+      const toPtX = (px) => px * scaleX;
+      const toPtY = (px) => px * scaleY;
+
+      // escreve textos usando Bahnschrift se disponível (caso contrário fallback)
+      // definimos fonte 'Helvetica' para garantir compatibilidade; se o usuário quiser usar Bahnschrift
+      // no PDF final será necessário registrar a fonte TTF no jsPDF (mais trabalho). Aqui usamos a fonte padrão,
+      // e no PNG/HTML a fonte Bahnschrift será usada quando disponível.
+      pdf.setTextColor(0,0,0);
+
+      // --- VALOR TOTAL (alinhado à direita como no original) ---
+      pdf.setFontSize(14);
+      pdf.setFont('Helvetica','bold');
+      const x_val = toPtX(coordsPx.valor_total.x);
+      const y_val = toPtY(coordsPx.valor_total.y);
+      // desenhar valor com alinhamento à direita (opção align: 'right' exige x = posição do lado direito)
+      pdf.text(String(valorFormatado).replace(/\s/g,''), x_val, y_val, { align: 'right' });
+
+      // --- CLIENTE ---
+      pdf.setFontSize(11);
+      pdf.setFont('Helvetica','normal');
+      pdf.text(cliente, toPtX(coordsPx.cliente.x), toPtY(coordsPx.cliente.y));
+
+      // --- CNPJ ---
+      pdf.text(cnpj, toPtX(coordsPx.cnpj.x), toPtY(coordsPx.cnpj.y));
+
+      // --- IMPORTÂNCIA POR EXTENSO ---
+      pdf.setFont('Helvetica','bold');
+      pdf.text(extenso, toPtX(coordsPx.extenso.x), toPtY(coordsPx.extenso.y));
+
+      // --- DESCRIÇÃO (wrap) ---
+      pdf.setFont('Helvetica','normal');
+      pdf.setFontSize(11);
+      // largura máxima: vamos usar 400pt (ajustável) ou converter uma largura px para pt
+      // supondo que você quer a descrição ocupando um bloco largo — convertemos 400px para pt
+      const maxWidthPx = 450; // ajuste se quiser que fique mais largo/estreito (valor em px)
+      const maxWidthPt = maxWidthPx * (pageW / imgW_px);
+      const descLines = pdf.splitTextToSize(descricao, maxWidthPt);
+      pdf.text(descLines, toPtX(coordsPx.descricao.x), toPtY(coordsPx.descricao.y));
+
+      // --- DATA (centralizada/posicionada) ---
+      const dataFmt = formatarData(dataInput);
+      pdf.setFontSize(11);
+      pdf.text(dataFmt, toPtX(coordsPx.data.x), toPtY(coordsPx.data.y));
+
+      // --- salva ---
+      const fileNameSafe = 'Recibo_' + cliente.replace(/\s+/g, '_') + '_' + dataFmt.replace(/\//g,'-') + '.pdf';
+      pdf.save(fileNameSafe);
+    };
+
+    img.onerror = function(){
+      const a = document.getElementById('alerta');
+      a.style.display = 'block';
+      a.innerText = "Erro: não foi possível carregar 'recibo_modelo.jpg'. Coloque a imagem na mesma pasta do HTML e atualize a página.";
+    };
+  }
+</script>
+</body>
+</html>
